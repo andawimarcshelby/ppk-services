@@ -4,89 +4,69 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use App\Models\UserSubmodule;
+use App\Models\Submodule;
 
 class ModuleController extends Controller
 {
     /**
-     * GET /api/modules
-     * Returns: [
-     *   {
-     *     "system_id": 1,
-     *     "system_name": "Admin",
-     *     "modules": [
-     *       {
-     *         "module_id": 10,
-     *         "module_name": "User Management",
-     *         "submodules": [{ "id": 100, "name": "Users", "route": "/admin/users" }]
-     *       }
-     *     ]
-     *   }
-     * ]
+     * Return systems → modules → submodules the current user can access.
+     * If the token is missing/invalid, return 401 so the frontend can
+     * clear local storage and redirect to login.
      */
     public function index(Request $request)
     {
         $user = $request->user();
-
-        // Get submodule IDs permitted for this user
-        $permSubIds = $user->submodules()->pluck('submodules.id');
-
-        if ($permSubIds->isEmpty()) {
-            return response()->json([]); // user has no permissions
+        if (!$user) {
+            return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        // Pull the rows we need in one query then group in PHP
-        $rows = DB::table('systems as sys')
-            ->join('modules as mod', 'mod.system_id', '=', 'sys.id')
-            ->join('submodules as sm', 'sm.module_id', '=', 'mod.id')
-            ->whereIn('sm.id', $permSubIds)
-            ->orderBy('sys.name')
-            ->orderBy('mod.name')
-            ->orderBy('sm.name')
-            ->get([
-                'sys.id  as system_id',
-                'sys.name as system_name',
-                'mod.id  as module_id',
-                'mod.name as module_name',
-                'sm.id   as submodule_id',
-                'sm.name as submodule_name',
-                'sm.route as submodule_route',
-            ]);
+        // IDs of submodules granted to this user
+        $allowedSubmoduleIds = UserSubmodule::where('user_id', $user->id)->pluck('submodule_id');
 
-        // Build hierarchical structure
-        $systems = [];
-        foreach ($rows as $r) {
-            if (!isset($systems[$r->system_id])) {
-                $systems[$r->system_id] = [
-                    'system_id'   => (int)$r->system_id,
-                    'system_name' => $r->system_name,
+        // Load submodules with their module & system relationships
+        $subs = Submodule::with(['module.system'])
+            ->whereIn('id', $allowedSubmoduleIds)
+            ->orderBy('id')
+            ->get();
+
+        // Build systems → modules → submodules shape
+        $bySystem = [];
+        foreach ($subs as $sm) {
+            $sys = $sm->module->system;
+            $mod = $sm->module;
+
+            if (!isset($bySystem[$sys->id])) {
+                $bySystem[$sys->id] = [
+                    'system_id'   => $sys->id,
+                    'system_name' => $sys->name,
                     'modules'     => [],
                 ];
             }
 
-            // Ensure module exists under system
-            if (!isset($systems[$r->system_id]['modules'][$r->module_id])) {
-                $systems[$r->system_id]['modules'][$r->module_id] = [
-                    'module_id'   => (int)$r->module_id,
-                    'module_name' => $r->module_name,
+            // find or create module bucket inside the system
+            $modulesArr =& $bySystem[$sys->id]['modules'];
+            $modIndex = null;
+            foreach ($modulesArr as $idx => $m) {
+                if ($m['module_id'] === $mod->id) { $modIndex = $idx; break; }
+            }
+            if ($modIndex === null) {
+                $modulesArr[] = [
+                    'module_id'   => $mod->id,
+                    'module_name' => $mod->name,
                     'submodules'  => [],
                 ];
+                $modIndex = array_key_last($modulesArr);
             }
 
-            // Push submodule
-            $systems[$r->system_id]['modules'][$r->module_id]['submodules'][] = [
-                'id'    => (int)$r->submodule_id,
-                'name'  => $r->submodule_name,
-                'route' => $r->submodule_route,
+            // push submodule
+            $modulesArr[$modIndex]['submodules'][] = [
+                'id'    => $sm->id,
+                'name'  => $sm->name,
+                'route' => $sm->route ?? null,
             ];
         }
 
-        // Re-index modules arrays (remove associative keys)
-        $result = array_map(function ($sys) {
-            $sys['modules'] = array_values($sys['modules']);
-            return $sys;
-        }, array_values($systems));
-
-        return response()->json($result);
+        return response()->json(array_values($bySystem));
     }
 }

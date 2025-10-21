@@ -1,121 +1,112 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getCompanies, login } from "../lib/api";
-
-const defaultPalette = {
-  primary: "#1E5128",
-  accent: "#D8E9A8",
-};
-
-function applyTheme(company) {
-  const p = company?.primary_color || defaultPalette.primary;
-  const a = company?.accent_color || defaultPalette.accent;
-  document.documentElement.style.setProperty("--primary", p);
-  document.documentElement.style.setProperty("--accent", a);
-}
+import { useEffect, useState } from 'react';
+import { getCompanies, login } from '../lib/api';
 
 export default function Login() {
   const [companies, setCompanies] = useState([]);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [companyCode, setCompanyCode] = useState("");
+  const [username, setUsername] = useState('alice');
+  const [password, setPassword] = useState('Passw0rd!');
+  const [companyCode, setCompanyCode] = useState('PPK-FARMS');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState("");
 
-  const navigate = useNavigate();
+  const params = new URLSearchParams(window.location.search);
+  const reason = params.get('reason'); // show "session expired" banner if present
 
   useEffect(() => {
     (async () => {
       try {
         const list = await getCompanies();
-        setCompanies(list);
-        if (list.length && !companyCode) setCompanyCode(list[0].code);
+        setCompanies(list ?? []);
       } catch (e) {
-        console.error(e);
-        setCompanies([]);
+        // ignore – UI will still render the form
       }
     })();
   }, []);
 
-  const handleSubmit = async (e) => {
+  async function onSubmit(e) {
     e.preventDefault();
-    setErr("");
+    setError('');
     setLoading(true);
     try {
-      const resp = await login({ username, password, company_code: companyCode });
-      // Persist
-      localStorage.setItem("ppk_token", resp.token);
-      localStorage.setItem("ppk_user", JSON.stringify(resp.user || {}));
-      localStorage.setItem("ppk_company", JSON.stringify(resp.company || {}));
-      // Theme for selected company
-      applyTheme(resp.company);
-      // Go to dashboard shell (protected)
-      navigate("/dashboard", { replace: true });
-    } catch (e) {
-      console.error(e);
-      setErr("Invalid credentials or server error.");
+      await login({ username, password, company_code: companyCode });
+      window.location.href = '/dashboard';
+    } catch (err) {
+      setError(err.message || 'Login failed');
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <section className="card" style={{ maxWidth: 520 }}>
-      <h2 className="text-xl font-semibold mb-2">Login</h2>
+    <div className="min-h-screen bg-neutral-900 text-neutral-200 p-6">
+      <div className="max-w-3xl mx-auto grid gap-6">
+        {/* Palette preview box (unchanged visual aid) */}
+        <div className="rounded-xl border border-white/5 bg-neutral-800/50 p-4 shadow">
+          <div className="text-lg font-semibold mb-2">Palette Preview</div>
+          <div className="flex items-center gap-5 text-xs opacity-80">
+            <span className="inline-flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#191A19]" /> #191A19 (bg)</span>
+            <span className="inline-flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#1E5128]" /> #1E5128 (primary)</span>
+            <span className="inline-flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#4E9F3D]" /> #4E9F3D (muted)</span>
+            <span className="inline-flex items-center gap-2"><span className="w-4 h-4 rounded bg-[#D8E9A8]" /> #D8E9A8 (accent)</span>
+          </div>
+        </div>
 
-      <form onSubmit={handleSubmit} className="grid gap-3">
-        <div>
-          <label className="block text-sm mb-1">Username</label>
+        <form onSubmit={onSubmit} className="rounded-xl border border-white/5 bg-neutral-800/50 p-5 shadow max-w-xl">
+          <div className="text-lg font-semibold mb-3">Login</div>
+
+          {reason === 'expired' && (
+            <div className="mb-3 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-200 px-3 py-2 text-sm">
+              Your session expired. Please sign in again.
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-3 rounded bg-red-500/10 border border-red-500/30 text-red-200 px-3 py-2 text-sm">
+              {error}
+            </div>
+          )}
+
+          <label className="block mb-2 text-sm">Username</label>
           <input
+            className="w-full rounded bg-neutral-900/70 border border-white/10 px-3 py-2 mb-4"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="search-input"
-            placeholder="alice"
+            autoComplete="username"
           />
-        </div>
 
-        <div>
-          <label className="block text-sm mb-1">Password</label>
+          <label className="block mb-2 text-sm">Password</label>
           <input
             type="password"
+            className="w-full rounded bg-neutral-900/70 border border-white/10 px-3 py-2 mb-4"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="search-input"
-            placeholder="••••••••"
+            autoComplete="current-password"
           />
-        </div>
 
-        <div>
-          <label className="block text-sm mb-1">Company</label>
+          <label className="block mb-2 text-sm">Company</label>
           <select
-            className="search-input"
+            className="w-full rounded bg-neutral-900/70 border border-white/10 px-3 py-2 mb-4"
             value={companyCode}
             onChange={(e) => setCompanyCode(e.target.value)}
           >
             {companies.map((c) => (
-              <option key={c.id} value={c.code}>
-                {c.name}
-              </option>
+              <option key={c.id} value={c.code}>{c.name}</option>
             ))}
           </select>
-        </div>
 
-        <button
-          disabled={loading}
-          className="px-3 py-2 rounded-md border"
-          type="submit"
-        >
-          {loading ? "Signing in..." : "Sign in"}
-        </button>
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex items-center gap-2 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 px-4 py-2"
+          >
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
 
-        {err && <div className="tree-note">Error: {err}</div>}
-
-        <div className="opacity-70 text-xs mt-2">
-          Sample credentials (from seed):<br />
-          Username: <b>alice</b>, Password: <b>Passw0rd!</b>, Company: <b>PPK Farms</b><br />
-          Username: <b>bob</b>, Password: <b>Passw0rd!</b>, Company: <b>PPK Fisheries</b>
-        </div>
-      </form>
-    </section>
+          <div className="mt-3 text-xs opacity-60">
+            Sample credentials (from seed): alice / Passw0rd! (PPK Farms), bob / Passw0rd! (PPK Fisheries)
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

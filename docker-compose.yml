@@ -1,0 +1,68 @@
+﻿services:
+  db:
+    image: postgres:15-alpine
+    container_name: ppk-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ppk_services
+      POSTGRES_USER: ppk_user
+      POSTGRES_PASSWORD: ppk_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ppk_user -d ppk_services"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ppk-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "1"
+      APP_URL: http://localhost:8000
+      # Database (PostgreSQL)
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_DATABASE: ppk_services
+      DB_USERNAME: ppk_user
+      DB_PASSWORD: ppk_pass
+    command: >
+      sh -lc "
+      if [ ! -f vendor/autoload.php ]; then composer install; fi &&
+      if [ ! -f .env ]; then cp .env.example .env || true; fi &&
+      php artisan key:generate --force &&
+      php artisan serve --host=0.0.0.0 --port=8000
+      "
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ppk-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/usr/src/app
+    environment:
+      VITE_API_BASE: /api
+
+volumes:
+  pgdata:
